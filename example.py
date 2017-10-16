@@ -37,6 +37,7 @@ def main(server, log_dir, config):
     learning_rate = config.get("learning_rate") or 0.0005
     training_epochs = config.get("training_epochs") or 20
     frequency = config.get("frequency") or 100
+    run_name = config.get("run_name") or "default)"
 
     # Between-graph replication
     with tf.device(tf.train.replica_device_setter(
@@ -102,7 +103,8 @@ def main(server, log_dir, config):
         init_op = tf.global_variables_initializer()
         print("Variables initialized ...")
 
-    sv = tf.train.Supervisor(is_chief=(task_index == 0),
+    is_chief = task_index == 0
+    sv = tf.train.Supervisor(is_chief=is_chief,
                              global_step=global_step,
                              init_op=init_op)
 
@@ -110,7 +112,10 @@ def main(server, log_dir, config):
     with sv.prepare_or_wait_for_session(server.target) as sess:
 
         # create log writer object (this will log on every machine)
-        writer = tf.summary.FileWriter(log_dir, graph=tf.get_default_graph())
+        log_dir += "/" + run_name
+        writer = None
+        if is_chief:
+            writer = tf.summary.FileWriter(log_dir, graph=tf.get_default_graph())
 
         # perform training cycles
         start_time = time.time()
@@ -128,7 +133,8 @@ def main(server, log_dir, config):
                 _, cost, summary, step = sess.run(
                     [train_op, cross_entropy, summary_op, global_step],
                     feed_dict={x: batch_x, y_: batch_y})
-                writer.add_summary(summary, step)
+                if is_chief:
+                    writer.add_summary(summary, step)
 
                 count += 1
                 if count % frequency == 0 or i + 1 == batch_count:
